@@ -19,6 +19,8 @@
 /* Includes ------------------------------------------------------------------*/
 #include "main.h"
 #include "spi.h"
+#include "tim.h"
+#include "usart.h"
 #include "gpio.h"
 
 /* Private includes ----------------------------------------------------------*/
@@ -40,6 +42,8 @@
 #define TICKS ((SystemCoreClock)/(FREQ))
 //const uint32_t ticks=SystemCoreClock/freq;
 #define LOOP_FREQ (SystemCoreClock/4000000)
+#define SystemCoreClockInMHz (SystemCoreClock/1000000)
+#define USE_TIM10_TIMING 1
 /* USER CODE END PD */
 
 /* Private macro -------------------------------------------------------------*/
@@ -114,6 +118,79 @@ void udelay_asm (uint32_t useconds) {
                  : [useconds] "r" (useconds)
                  : "r0");
 }
+
+volatile uint32_t tim10_overflows = 0;
+
+void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim)
+{
+	  if( htim->Instance == TIM10 )
+	  {
+	   ++tim10_overflows;
+	  }
+}
+
+inline void TIM10_reinit()
+{
+		HAL_TIM_Base_Stop(&htim10);
+		__HAL_TIM_SET_PRESCALER( &htim10, (SystemCoreClockInMHz-1) );
+		__HAL_TIM_SET_COUNTER( &htim10, 0 );
+		tim10_overflows = 0;
+		HAL_TIM_Base_Start_IT(&htim10);
+}
+
+inline uint32_t get_tim10_us()
+{
+		__HAL_TIM_DISABLE_IT(&htim10, TIM_IT_UPDATE); //! Дуже важливо!
+		//__disable_irq();
+		uint32_t res = tim10_overflows * 10000 + __HAL_TIM_GET_COUNTER(&htim10);
+		//__enable_irq();
+		__HAL_TIM_ENABLE_IT(&htim10, TIM_IT_UPDATE);
+		return res;
+}
+inline void udelay_TIM10(uint32_t useconds) {
+	uint32_t before = get_tim10_us();
+	while( get_tim10_us() < before+useconds){}
+}
+
+void init_timing()
+{
+#ifdef  USE_HAL_DELAY_AND_ASM
+ return;
+#elif defined USE_DWT_TIMING
+ DWT_Init();
+#elif defined USE_TIM10_TIMING
+ TIM10_reinit();
+#else
+#error "Unknown timing method."
+#endif
+}
+
+inline uint32_t get_us()
+{
+#ifdef  USE_HAL_DELAY_AND_ASM
+ return 1000*HAL_GetTick();
+#elif defined USE_DWT_TIMING
+ return get_DWT_us();
+#elif defined USE_TIM10_TIMING
+ return get_tim10_us();
+#else
+#error "Unknown timing method."
+#endif
+}
+
+inline void udelay(uint32_t useconds)
+{
+#ifdef  USE_HAL_DELAY_AND_ASM
+ udelay_asm(useconds);
+#elif defined USE_DWT_TIMING
+ udelay_DWT(useconds);
+#elif defined USE_TIM10_TIMING
+ udelay_TIM10(useconds);
+#else
+#error "Unknown timing method."
+#endif
+}
+
 /* USER CODE END 0 */
 
 /**
@@ -145,6 +222,8 @@ int main(void)
   /* Initialize all configured peripherals */
   MX_GPIO_Init();
   MX_SPI1_Init();
+  MX_TIM10_Init();
+  MX_USART2_UART_Init();
   /* USER CODE BEGIN 2 */
 
 
@@ -154,15 +233,15 @@ int main(void)
       HAL_GPIO_WritePin(GPIOC, GPIO_PIN_8, GPIO_PIN_SET); // Синім позначатимемо помилку
       printf("Error -- Echo line is high, though no impuls was given\n");
      }
-    lcd1.hw_conf.spi_handle = &hspi1;
-	lcd1.hw_conf.spi_cs_pin =  LCD1_CS_Pin;
-	lcd1.hw_conf.spi_cs_port = LCD1_CS_GPIO_Port;
-	lcd1.hw_conf.rst_pin =  LCD1_RST_Pin;
-	lcd1.hw_conf.rst_port = LCD1_RST_GPIO_Port;
-	lcd1.hw_conf.dc_pin =  LCD1_DC_Pin;
-	lcd1.hw_conf.dc_port = LCD1_DC_GPIO_Port;
-	lcd1.def_scr = lcd5110_def_scr;
-	LCD5110_init(&lcd1.hw_conf, LCD5110_NORMAL_MODE, 0x40, 2, 3);
+//    lcd1.hw_conf.spi_handle = &hspi1;
+//	lcd1.hw_conf.spi_cs_pin =  LCD1_CS_Pin;
+//	lcd1.hw_conf.spi_cs_port = LCD1_CS_GPIO_Port;
+//	lcd1.hw_conf.rst_pin =  LCD1_RST_Pin;
+//	lcd1.hw_conf.rst_port = LCD1_RST_GPIO_Port;
+//	lcd1.hw_conf.dc_pin =  LCD1_DC_Pin;
+//	lcd1.hw_conf.dc_port = LCD1_DC_GPIO_Port;
+//	lcd1.def_scr = lcd5110_def_scr;
+//	LCD5110_init(&lcd1.hw_conf, LCD5110_NORMAL_MODE, 0x40, 2, 3);
   /* USER CODE END 2 */
 
   /* Infinite loop */
@@ -181,22 +260,13 @@ int main(void)
     	    uint32_t before = HAL_GetTick();
     	    while(HAL_GPIO_ReadPin(ECHO_GPIO_Port, ECHO_Pin) == GPIO_PIN_SET );
     	      {}
-    	    uint32_t pulse_time = HAL_GetTick()-before;
-    	    //! Увага, не забудьте додати:
-    	    // monitor arm semihosting enable
-    	    // До  Debug Configurations -> Startup Tab:
-//    	    LCD5110_print("Distance is : \n", BLACK, &lcd1);
-  		//! Увага, не забудьте додати:
-  		// monitor arm semihosting enable
-  		// До  Debug Configurations -> Startup Tab:
+    	    uint32_t pulse_time = -before;
+
   		char buffer[100];
   		sprintf(buffer, "%d",  pulse_time*343/20);
-  		LCD5110_print(buffer, BLACK, &lcd1);
+  		HAL_UART_Transmit(&huart2, buffer,sizeof(buffer),10);
   		HAL_Delay(500);
-  		LCD5110_clear_scr(&lcd1);
-
   	}
-
   /* USER CODE END 3 */
 }
 
