@@ -18,9 +18,10 @@
 /* USER CODE END Header */
 /* Includes ------------------------------------------------------------------*/
 #include "main.h"
-#include <stdbool.h>
-
-/* Private includes ------------------------------*/
+#include "lcd5110.h"
+#include "spi.h"
+#include "gpio.h"
+/* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
 
 /* USER CODE END Includes */
@@ -38,6 +39,7 @@
 // const uint32_t freq=1000000/microseconds_granularity;
 #define TICKS ((SystemCoreClock)/(FREQ))
 //const uint32_t ticks=SystemCoreClock/freq;
+#define LOOP_FREQ (SystemCoreClock/4000000)
 /* USER CODE END PD */
 
 /* Private macro -------------------------------------------------------------*/
@@ -46,40 +48,71 @@
 /* USER CODE END PM */
 
 /* Private variables ---------------------------------------------------------*/
+SPI_HandleTypeDef hspi2;
 
 /* USER CODE BEGIN PV */
-inline static void delay_some_us(uint32_t mks)
-{
-	uint32_t ticks=mks/MICROSECONDS_GRANULARITY;
-	int stop_ticks=ticks+HAL_GetTick();
-	while (HAL_GetTick() < stop_ticks) {};
-}
+inline void udelay_asm (uint32_t useconds) {
+ useconds *= LOOP_FREQ;
 
-//! «‡ÚËÏÍ‡ ‚ Ï≥ÍÓÒÂÍÛÌ‰‡ı
-inline static void delay_some_us1 (uint32_t dlyTicks) {
-	// ¬ÁˇÚÓ Á leaflabs Maple
-	dlyTicks *= 6; //STM32_DELAY_US_MULT;
-
-	/* ÕÂ‚ÂÎËÍ‡ ≥ ÌÂ ‰ÛÊÂ ÚÓ˜Ì‡ ÔÓÔ‡‚Í‡ Ì‡ ˜‡Ò ‚ËÍÎËÍÛ ÙÛÌˆ≥ø */
-	dlyTicks--;
-	asm volatile("   mov r0, %[dlyTicks]          \n\t"
-	             "1: subs r0, #1            \n\t"
-	             "   bhi 1b                 \n\t"
-	             :
-	             : [dlyTicks] "r" (dlyTicks)
-	             : "r0");
+    asm volatile("   mov r0, %[useconds]    \n\t"
+                 "1: subs r0, #1            \n\t"
+                 "   bhi 1b                 \n\t"
+                 :
+                 : [useconds] "r" (useconds)
+                 : "r0");
 }
+typedef enum state_t {
+ IDLE_S,
+ TRIGGERING_S,
+ WAITING_FOR_ECHO_START_S,
+ WAITING_FOR_ECHO_STOP_S,
+ TRIG_NOT_WENT_LOW_S,
+ ECHO_TIMEOUT_S,
+ ECHO_NOT_WENT_LOW_S,
+ READING_DATA_S,
+ ERROR_S
+} state_t;
+
+volatile state_t state = IDLE_S;
+
+volatile uint32_t echo_start;
+volatile uint32_t echo_finish;
+volatile uint32_t measured_time;
+
+void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
+	{
+	 if (GPIO_Pin == GPIO_PIN_2 )
+	 {
+	  switch (state) {
+	  case WAITING_FOR_ECHO_START_S: {
+	   echo_start =  get_us();
+	   state = WAITING_FOR_ECHO_STOP_S;
+	   break;
+	  }
+	  case WAITING_FOR_ECHO_STOP_S: {
+	   echo_finish = get_us();
+	   measured_time = echo_finish - echo_start;
+	   state = READING_DATA_S;
+	   break;
+	  }
+	  default:
+	   state = ERROR_S;
+	  }
+	 }
+	}
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
 void SystemClock_Config(void);
 static void MX_GPIO_Init(void);
+static void MX_SPI2_Init(void);
 /* USER CODE BEGIN PFP */
 
 /* USER CODE END PFP */
 
 /* Private user code ---------------------------------------------------------*/
 /* USER CODE BEGIN 0 */
+LCD5110_display lcd1;
 
 /* USER CODE END 0 */
 
@@ -111,20 +144,23 @@ int main(void)
 
   /* Initialize all configured peripherals */
   MX_GPIO_Init();
+  MX_SPI2_Init();
   /* USER CODE BEGIN 2 */
   if( HAL_GPIO_ReadPin(GPIOB, GPIO_PIN_2) )
    {
     // Помилка -- імпульсу не було, а на Echo вже одиниця
     HAL_GPIO_WritePin(GPIOC, GPIO_PIN_8, GPIO_PIN_SET); // Синім позначатимемо помилку
     printf("Error -- Echo line is high, though no impuls was given\n");
-    while(1); // Зависаємо
-   }
 
-   uint32_t starting_ticks;
-   uint32_t timeout_ticks;
-   uint32_t distance_mm;
-
-   bool are_echoing=false; // For C needs <stdbool.h>! Some violation of strict C standard here.
+    lcd1.hw_conf.spi_handle = &hspi2;
+	lcd1.hw_conf.spi_cs_pin =  LCD1_CS_Pin;
+	lcd1.hw_conf.spi_cs_port = LCD1_CS_GPIO_Port;
+	lcd1.hw_conf.rst_pin =  LCD1_RST_Pin;
+	lcd1.hw_conf.rst_port = LCD1_RST_GPIO_Port;
+	lcd1.hw_conf.dc_pin =  LCD1_DC_Pin;
+	lcd1.hw_conf.dc_port = LCD1_DC_GPIO_Port;
+	lcd1.def_scr = lcd5110_def_scr;
+	LCD5110_init(&lcd1.hw_conf, LCD5110_NORMAL_MODE, 0x40, 2, 3);
 
   /* USER CODE END 2 */
 
@@ -132,67 +168,41 @@ int main(void)
   /* USER CODE BEGIN WHILE */
     while (1)
     {
+    	init_timing();
     /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */
-    	if(!are_echoing)
-    			{
-    				// œ‡ÛÁ‡ Ï≥Ê ‚ËÏ≥‡ÏË, ‰‚≥˜≥ ÔÓ 1/4 ÒÂÍÛÌ‰Ë
-    				delay_some_us(500000/2);
-    				// √‡ÒËÏÓ Ò‚≥ÚÎÓ‰≥Ó‰Ë
-    				HAL_GPIO_WritePin(GPIOC, GPIO_PIN_8, GPIO_PIN_RESET);
-    				HAL_GPIO_WritePin(GPIOC, GPIO_PIN_9, GPIO_PIN_RESET);
-    				delay_some_us(500000/2);
-    				are_echoing=true;
-    				// œÓÒËÎ‡∫ÏÓ ≥ÏÔÛÎ¸Ò
-    				HAL_GPIO_WritePin(GPIOB, GPIO_PIN_1, GPIO_PIN_SET);
-    				delay_some_us(12);
-    				HAL_GPIO_WritePin(GPIOB, GPIO_PIN_1, GPIO_PIN_RESET);
-    				// œÓ˜ËÌ‡∫ÏÓ Á‡Ï≥ˇÚË ˜‡Ò
-    				timeout_ticks=HAL_GetTick();
-    			}else{
-    				// ﬂÍ˘Ó Ê ÔÓ‰‡ÎË -- ˜ÂÍ‡∫ÏÓ Ì‡ ≥ÏÔÛÎ¸Ò ≥ Á‡Ï≥ˇ∫ÏÓ ÈÓ„Ó ÚË‚‡Î≥ÒÚ¸
-    				bool measuring=false;
-    				uint32_t measured_time;
-    				// —Í≥Î¸ÍË ˜ÂÍ‡ÚË, ÔÓÍË ÌÂ ‚Ë≥¯ËÚË, ˘Ó ≥ÏÔÛÎ¸ÒÛ ‚ÊÂ ÌÂ ·Û‰Â
-    				uint32_t usoniq_timeout = 100000;
-    				while( (HAL_GetTick() - timeout_ticks) < usoniq_timeout )
-    				{
-    					// œÂÂ‚≥ˇ∫ÏÓ ÎÓ„≥˜ÌËÈ ≥‚ÂÌ¸ Ì‡ Echo
-    					//printf("B->IDR %X\n",GPIOB->IDR);
-    					if( HAL_GPIO_ReadPin(GPIOB, GPIO_PIN_2) )
-    					{
-    						// ﬂÍ˘Ó ‡Ì≥¯Â ÒË„Ì‡ÎÛ ÌÂ ·ÛÎÓ, ÔÓ˜ËÌ‡∫ÏÓ Á‡Ï≥ˇÚË ÈÓ„Ó ÚË‚‡Î≥ÒÚ¸
-    						if( !measuring )
-    						{
-    							starting_ticks=HAL_GetTick();
-    							measuring=true;
-    						}
-    					}else{
-    						// ﬂÍ˘Ó ÒË„Ì‡Î Ì‡ Echo ·Û‚ ≥ ÁÌËÍ -- Á‡Ï≥ˇ∫ÏÓ ÈÓ„Ó ÚË‚‡Î≥ÒÚ¸
-    						if(measuring)
-    						{
-    							// –ÂÁÛÎ¸Ú‡Ú ·Û‰Â ‚ Ï≥Î≥ÏÂÚ‡ı
-    							measured_time = (HAL_GetTick() - starting_ticks)*10*MICROSECONDS_GRANULARITY;
-    							distance_mm = measured_time/58;
-    							// œÓ‚≥‰ÓÏÎˇ∫ÏÓ ÔÓ ÛÒÔ≥¯ÌËÈ ‚ËÏ≥ ÁÂÎÂÌËÏ Ò‚≥ÚÎÓ‰≥Ó‰ÓÏ
-    							HAL_GPIO_WritePin(GPIOC, GPIO_PIN_9, GPIO_PIN_SET);
-    							break;
-    						}
-    					}
-    				}
-    				if(!measuring)
-    				{
-    					// ÕÂ ÓÚËÏ‡ÎË ÒË„Ì‡ÎÛ, ÔÓ‚≥‰ÓÏÎˇ∫ÏÓ ÔÓ ÔÓÏËÎÍÛ ≥ ÔÓ·Û∫ÏÓ ˘Â
-    					HAL_GPIO_WritePin(GPIOC, GPIO_PIN_8, GPIO_PIN_SET);
-    					printf("Echo signal not arrived in time\n");
-    				}else{
-    					printf("Distance: %u mm, measured time: %lu us\n",distance_mm, measured_time/10);
-    				}
-    				are_echoing=false;
+    	HAL_GPIO_WritePin(Trig_GPIO_Port, Trig_Pin, GPIO_PIN_SET);
+		udelay(16);
+		HAL_GPIO_WritePin(Trig_GPIO_Port, Trig_Pin, GPIO_PIN_RESET);
 
-    			}
-    	  }
+		state = WAITING_FOR_ECHO_START_S;
+
+		while( state == WAITING_FOR_ECHO_START_S && state != ERROR_S )
+		{}
+		if ( state == ERROR_S )
+		{
+		LCD5110_print("Unexpected error while waiting for ECHO to start.\n", BLACK, &lcd1);
+		continue;
+		}
+		while( state == WAITING_FOR_ECHO_STOP_S && state != ERROR_S )
+		{}
+		if ( state == ERROR_S )
+		{
+		LCD5110_print("Unexpected error while waiting for ECHO to finish.\n", BLACK, &lcd1);
+		continue;
+		}
+
+		uint32_t distance = measured_time/58;
+		//! Увага, не забудьте додати:
+		// monitor arm semihosting enable
+		// До  Debug Configurations -> Startup Tab:
+		LCD5110_print("Time: %lu us, distance: %lu cm\n",
+		 measured_time,
+		 distance,
+		 BLACK, &lcd1);
+     }
+	}
   }
   /* USER CODE END 3 */
 
@@ -242,6 +252,44 @@ void SystemClock_Config(void)
 }
 
 /**
+  * @brief SPI2 Initialization Function
+  * @param None
+  * @retval None
+  */
+static void MX_SPI2_Init(void)
+{
+
+  /* USER CODE BEGIN SPI2_Init 0 */
+
+  /* USER CODE END SPI2_Init 0 */
+
+  /* USER CODE BEGIN SPI2_Init 1 */
+
+  /* USER CODE END SPI2_Init 1 */
+  /* SPI2 parameter configuration*/
+  hspi2.Instance = SPI2;
+  hspi2.Init.Mode = SPI_MODE_MASTER;
+  hspi2.Init.Direction = SPI_DIRECTION_2LINES;
+  hspi2.Init.DataSize = SPI_DATASIZE_8BIT;
+  hspi2.Init.CLKPolarity = SPI_POLARITY_LOW;
+  hspi2.Init.CLKPhase = SPI_PHASE_1EDGE;
+  hspi2.Init.NSS = SPI_NSS_SOFT;
+  hspi2.Init.BaudRatePrescaler = SPI_BAUDRATEPRESCALER_2;
+  hspi2.Init.FirstBit = SPI_FIRSTBIT_MSB;
+  hspi2.Init.TIMode = SPI_TIMODE_DISABLE;
+  hspi2.Init.CRCCalculation = SPI_CRCCALCULATION_DISABLE;
+  hspi2.Init.CRCPolynomial = 10;
+  if (HAL_SPI_Init(&hspi2) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  /* USER CODE BEGIN SPI2_Init 2 */
+
+  /* USER CODE END SPI2_Init 2 */
+
+}
+
+/**
   * @brief GPIO Initialization Function
   * @param None
   * @retval None
@@ -254,26 +302,44 @@ static void MX_GPIO_Init(void)
 
   /* GPIO Ports Clock Enable */
   __HAL_RCC_GPIOH_CLK_ENABLE();
-  __HAL_RCC_GPIOB_CLK_ENABLE();
   __HAL_RCC_GPIOC_CLK_ENABLE();
   __HAL_RCC_GPIOA_CLK_ENABLE();
+  __HAL_RCC_GPIOB_CLK_ENABLE();
 
   /*Configure GPIO pin Output Level */
-  HAL_GPIO_WritePin(GPIOB, GPIO_PIN_1, GPIO_PIN_RESET);
+  HAL_GPIO_WritePin(GPIOA, GPIO_PIN_0|GPIO_PIN_1|GPIO_PIN_4, GPIO_PIN_RESET);
+
+  /*Configure GPIO pin Output Level */
+  HAL_GPIO_WritePin(Trig_GPIO_Port, Trig_Pin, GPIO_PIN_RESET);
 
   /*Configure GPIO pin Output Level */
   HAL_GPIO_WritePin(GPIOC, GPIO_PIN_8|GPIO_PIN_9, GPIO_PIN_RESET);
 
-  /*Configure GPIO pin : PB1 */
-  GPIO_InitStruct.Pin = GPIO_PIN_1;
+  /*Configure GPIO pins : PA0 PA1 PA4 */
+  GPIO_InitStruct.Pin = GPIO_PIN_0|GPIO_PIN_1|GPIO_PIN_4;
   GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
   GPIO_InitStruct.Pull = GPIO_NOPULL;
   GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
-  HAL_GPIO_Init(GPIOB, &GPIO_InitStruct);
+  HAL_GPIO_Init(GPIOA, &GPIO_InitStruct);
+
+  /*Configure GPIO pins : PA5 PA7 */
+  GPIO_InitStruct.Pin = GPIO_PIN_5|GPIO_PIN_7;
+  GPIO_InitStruct.Mode = GPIO_MODE_AF_PP;
+  GPIO_InitStruct.Pull = GPIO_NOPULL;
+  GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_VERY_HIGH;
+  GPIO_InitStruct.Alternate = GPIO_AF5_SPI1;
+  HAL_GPIO_Init(GPIOA, &GPIO_InitStruct);
+
+  /*Configure GPIO pin : Trig_Pin */
+  GPIO_InitStruct.Pin = Trig_Pin;
+  GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
+  GPIO_InitStruct.Pull = GPIO_NOPULL;
+  GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
+  HAL_GPIO_Init(Trig_GPIO_Port, &GPIO_InitStruct);
 
   /*Configure GPIO pin : PB2 */
   GPIO_InitStruct.Pin = GPIO_PIN_2;
-  GPIO_InitStruct.Mode = GPIO_MODE_INPUT;
+  GPIO_InitStruct.Mode = GPIO_MODE_IT_RISING_FALLING;
   GPIO_InitStruct.Pull = GPIO_NOPULL;
   HAL_GPIO_Init(GPIOB, &GPIO_InitStruct);
 
@@ -283,6 +349,10 @@ static void MX_GPIO_Init(void)
   GPIO_InitStruct.Pull = GPIO_NOPULL;
   GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
   HAL_GPIO_Init(GPIOC, &GPIO_InitStruct);
+
+  /* EXTI interrupt init*/
+  HAL_NVIC_SetPriority(EXTI2_IRQn, 0, 0);
+  HAL_NVIC_EnableIRQ(EXTI2_IRQn);
 
 /* USER CODE BEGIN MX_GPIO_Init_2 */
 /* USER CODE END MX_GPIO_Init_2 */
