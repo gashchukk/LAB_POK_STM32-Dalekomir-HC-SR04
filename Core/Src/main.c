@@ -18,14 +18,12 @@
 /* USER CODE END Header */
 /* Includes ------------------------------------------------------------------*/
 #include "main.h"
-#include "lcd5110.h"
 #include "spi.h"
 #include "gpio.h"
 
-
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
-
+#include "lcd5110.h"
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -46,22 +44,15 @@
 
 /* Private macro -------------------------------------------------------------*/
 /* USER CODE BEGIN PM */
-
+void init_timing();
+uint32_t get_us();
+void udelay(uint32_t useconds);
 /* USER CODE END PM */
 
 /* Private variables ---------------------------------------------------------*/
 
 /* USER CODE BEGIN PV */
-inline void udelay_asm (uint32_t useconds) {
- useconds *= LOOP_FREQ;
 
-    asm volatile("   mov r0, %[useconds]    \n\t"
-                 "1: subs r0, #1            \n\t"
-                 "   bhi 1b                 \n\t"
-                 :
-                 : [useconds] "r" (useconds)
-                 : "r0");
-}
 typedef enum state_t {
  IDLE_S,
  TRIGGERING_S,
@@ -112,6 +103,17 @@ void SystemClock_Config(void);
 /* Private user code ---------------------------------------------------------*/
 /* USER CODE BEGIN 0 */
 LCD5110_display lcd1;
+
+void udelay_asm (uint32_t useconds) {
+ useconds *= LOOP_FREQ;
+
+    asm volatile("   mov r0, %[useconds]    \n\t"
+                 "1: subs r0, #1            \n\t"
+                 "   bhi 1b                 \n\t"
+                 :
+                 : [useconds] "r" (useconds)
+                 : "r0");
+}
 /* USER CODE END 0 */
 
 /**
@@ -144,65 +146,60 @@ int main(void)
   MX_GPIO_Init();
   MX_SPI1_Init();
   /* USER CODE BEGIN 2 */
-    if( HAL_GPIO_ReadPin(GPIOB, GPIO_PIN_2) )
+
+
+    if( HAL_GPIO_ReadPin(ECHO_GPIO_Port, ECHO_Pin) )
      {
       // Помилка -- імпульсу не було, а на Echo вже одиниця
       HAL_GPIO_WritePin(GPIOC, GPIO_PIN_8, GPIO_PIN_SET); // Синім позначатимемо помилку
       printf("Error -- Echo line is high, though no impuls was given\n");
-
-		lcd1.hw_conf.spi_handle = &hspi1;
-		lcd1.hw_conf.spi_cs_pin =  LCD1_CS_Pin;
-		lcd1.hw_conf.spi_cs_port = LCD1_CS_GPIO_Port;
-		lcd1.hw_conf.rst_pin =  LCD1_RST_Pin;
-		lcd1.hw_conf.rst_port = LCD1_RST_GPIO_Port;
-		lcd1.hw_conf.dc_pin =  LCD1_DC_Pin;
-		lcd1.hw_conf.dc_port = LCD1_DC_GPIO_Port;
-		lcd1.def_scr = lcd5110_def_scr;
-		LCD5110_init(&lcd1.hw_conf, LCD5110_NORMAL_MODE, 0x40, 2, 3);
-
+     }
+    lcd1.hw_conf.spi_handle = &hspi1;
+	lcd1.hw_conf.spi_cs_pin =  LCD1_CS_Pin;
+	lcd1.hw_conf.spi_cs_port = LCD1_CS_GPIO_Port;
+	lcd1.hw_conf.rst_pin =  LCD1_RST_Pin;
+	lcd1.hw_conf.rst_port = LCD1_RST_GPIO_Port;
+	lcd1.hw_conf.dc_pin =  LCD1_DC_Pin;
+	lcd1.hw_conf.dc_port = LCD1_DC_GPIO_Port;
+	lcd1.def_scr = lcd5110_def_scr;
+	LCD5110_init(&lcd1.hw_conf, LCD5110_NORMAL_MODE, 0x40, 2, 3);
   /* USER CODE END 2 */
 
   /* Infinite loop */
   /* USER CODE BEGIN WHILE */
       while (1)
       {
-      	init_timing();
     /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */
-      	HAL_GPIO_WritePin(TRIG_GPIO_Port, TRIG_Pin, GPIO_PIN_SET);
-  		udelay(16);
-  		HAL_GPIO_WritePin(TRIG_GPIO_Port, TRIG_Pin, GPIO_PIN_RESET);
+    	  HAL_GPIO_WritePin(TRIG_GPIO_Port, TRIG_Pin, GPIO_PIN_SET);
+    	    udelay_asm(16);
+    	    HAL_GPIO_WritePin(TRIG_GPIO_Port, TRIG_Pin, GPIO_PIN_RESET);
 
-  		state = WAITING_FOR_ECHO_START_S;
-
-  		while( state == WAITING_FOR_ECHO_START_S && state != ERROR_S )
-  		{}
-  		if ( state == ERROR_S )
-  		{
-  		LCD5110_print("Unexpected error while waiting for ECHO to start.\n", BLACK, &lcd1);
-  		continue;
-  		}
-  		while( state == WAITING_FOR_ECHO_STOP_S && state != ERROR_S )
-  		{}
-  		if ( state == ERROR_S )
-  		{
-  		LCD5110_print("Unexpected error while waiting for ECHO to finish.\n", BLACK, &lcd1);
-  		continue;
-  		}
-
-  		uint32_t distance = measured_time/58;
+    	    while(HAL_GPIO_ReadPin(ECHO_GPIO_Port, ECHO_Pin) == GPIO_PIN_RESET );
+    	      {}
+    	    uint32_t before = HAL_GetTick();
+    	    while(HAL_GPIO_ReadPin(ECHO_GPIO_Port, ECHO_Pin) == GPIO_PIN_SET );
+    	      {}
+    	    uint32_t pulse_time = HAL_GetTick()-before;
+    	    //! Увага, не забудьте додати:
+    	    // monitor arm semihosting enable
+    	    // До  Debug Configurations -> Startup Tab:
+    	    LCD5110_print("Distance is : ", BLACK, &lcd1);
   		//! Увага, не забудьте додати:
   		// monitor arm semihosting enable
   		// До  Debug Configurations -> Startup Tab:
   		char buffer[100];
 //  		LCD5110_print("Time is %lu us", BLACK, &lcd1);
 //  		LCD5110_print("Distance is %lu cm", BLACK, &lcd1);
-  		sprintf(buffer, "%d", distance);
+  		sprintf(buffer, "%d",  pulse_time*343/20);
+  		LCD5110_print(buffer, BLACK, &lcd1);
+  		memset(buffer, '\0', sizeof(buffer));
   	}
-    }
+
   /* USER CODE END 3 */
 }
+
 /**
   * @brief System Clock Configuration
   * @retval None
