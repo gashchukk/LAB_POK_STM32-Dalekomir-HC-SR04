@@ -1,9 +1,9 @@
 /* USER CODE BEGIN Header */
 /**
-  ******************************************************************************
+  **************************************************************************
   * @file           : main.c
   * @brief          : Main program body
-  ******************************************************************************
+  **************************************************************************
   * @attention
   *
   * Copyright (c) 2023 STMicroelectronics.
@@ -13,7 +13,7 @@
   * in the root directory of this software component.
   * If no LICENSE file comes with this software, it is provided AS-IS.
   *
-  ******************************************************************************
+  **************************************************************************
   */
 /* USER CODE END Header */
 /* Includes ------------------------------------------------------------------*/
@@ -21,6 +21,8 @@
 #include "lcd5110.h"
 #include "spi.h"
 #include "gpio.h"
+
+
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
 
@@ -48,7 +50,6 @@
 /* USER CODE END PM */
 
 /* Private variables ---------------------------------------------------------*/
-SPI_HandleTypeDef hspi2;
 
 /* USER CODE BEGIN PV */
 inline void udelay_asm (uint32_t useconds) {
@@ -104,8 +105,6 @@ void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
 
 /* Private function prototypes -----------------------------------------------*/
 void SystemClock_Config(void);
-static void MX_GPIO_Init(void);
-static void MX_SPI2_Init(void);
 /* USER CODE BEGIN PFP */
 
 /* USER CODE END PFP */
@@ -113,7 +112,6 @@ static void MX_SPI2_Init(void);
 /* Private user code ---------------------------------------------------------*/
 /* USER CODE BEGIN 0 */
 LCD5110_display lcd1;
-
 /* USER CODE END 0 */
 
 /**
@@ -144,68 +142,67 @@ int main(void)
 
   /* Initialize all configured peripherals */
   MX_GPIO_Init();
-  MX_SPI2_Init();
+  MX_SPI1_Init();
   /* USER CODE BEGIN 2 */
-  if( HAL_GPIO_ReadPin(GPIOB, GPIO_PIN_2) )
-   {
-    // Помилка -- імпульсу не було, а на Echo вже одиниця
-    HAL_GPIO_WritePin(GPIOC, GPIO_PIN_8, GPIO_PIN_SET); // Синім позначатимемо помилку
-    printf("Error -- Echo line is high, though no impuls was given\n");
+    if( HAL_GPIO_ReadPin(GPIOB, GPIO_PIN_2) )
+     {
+      // Помилка -- імпульсу не було, а на Echo вже одиниця
+      HAL_GPIO_WritePin(GPIOC, GPIO_PIN_8, GPIO_PIN_SET); // Синім позначатимемо помилку
+      printf("Error -- Echo line is high, though no impuls was given\n");
 
-    lcd1.hw_conf.spi_handle = &hspi2;
-	lcd1.hw_conf.spi_cs_pin =  LCD1_CS_Pin;
-	lcd1.hw_conf.spi_cs_port = LCD1_CS_GPIO_Port;
-	lcd1.hw_conf.rst_pin =  LCD1_RST_Pin;
-	lcd1.hw_conf.rst_port = LCD1_RST_GPIO_Port;
-	lcd1.hw_conf.dc_pin =  LCD1_DC_Pin;
-	lcd1.hw_conf.dc_port = LCD1_DC_GPIO_Port;
-	lcd1.def_scr = lcd5110_def_scr;
-	LCD5110_init(&lcd1.hw_conf, LCD5110_NORMAL_MODE, 0x40, 2, 3);
+		lcd1.hw_conf.spi_handle = &hspi1;
+		lcd1.hw_conf.spi_cs_pin =  LCD1_CS_Pin;
+		lcd1.hw_conf.spi_cs_port = LCD1_CS_GPIO_Port;
+		lcd1.hw_conf.rst_pin =  LCD1_RST_Pin;
+		lcd1.hw_conf.rst_port = LCD1_RST_GPIO_Port;
+		lcd1.hw_conf.dc_pin =  LCD1_DC_Pin;
+		lcd1.hw_conf.dc_port = LCD1_DC_GPIO_Port;
+		lcd1.def_scr = lcd5110_def_scr;
+		LCD5110_init(&lcd1.hw_conf, LCD5110_NORMAL_MODE, 0x40, 2, 3);
 
   /* USER CODE END 2 */
 
   /* Infinite loop */
   /* USER CODE BEGIN WHILE */
-    while (1)
-    {
-    	init_timing();
+      while (1)
+      {
+      	init_timing();
     /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */
-    	HAL_GPIO_WritePin(Trig_GPIO_Port, Trig_Pin, GPIO_PIN_SET);
-		udelay(16);
-		HAL_GPIO_WritePin(Trig_GPIO_Port, Trig_Pin, GPIO_PIN_RESET);
+      	HAL_GPIO_WritePin(TRIG_GPIO_Port, TRIG_Pin, GPIO_PIN_SET);
+  		udelay(16);
+  		HAL_GPIO_WritePin(TRIG_GPIO_Port, TRIG_Pin, GPIO_PIN_RESET);
 
-		state = WAITING_FOR_ECHO_START_S;
+  		state = WAITING_FOR_ECHO_START_S;
 
-		while( state == WAITING_FOR_ECHO_START_S && state != ERROR_S )
-		{}
-		if ( state == ERROR_S )
-		{
-		LCD5110_print("Unexpected error while waiting for ECHO to start.\n", BLACK, &lcd1);
-		continue;
-		}
-		while( state == WAITING_FOR_ECHO_STOP_S && state != ERROR_S )
-		{}
-		if ( state == ERROR_S )
-		{
-		LCD5110_print("Unexpected error while waiting for ECHO to finish.\n", BLACK, &lcd1);
-		continue;
-		}
+  		while( state == WAITING_FOR_ECHO_START_S && state != ERROR_S )
+  		{}
+  		if ( state == ERROR_S )
+  		{
+  		LCD5110_print("Unexpected error while waiting for ECHO to start.\n", BLACK, &lcd1);
+  		continue;
+  		}
+  		while( state == WAITING_FOR_ECHO_STOP_S && state != ERROR_S )
+  		{}
+  		if ( state == ERROR_S )
+  		{
+  		LCD5110_print("Unexpected error while waiting for ECHO to finish.\n", BLACK, &lcd1);
+  		continue;
+  		}
 
-		uint32_t distance = measured_time/58;
-		//! Увага, не забудьте додати:
-		// monitor arm semihosting enable
-		// До  Debug Configurations -> Startup Tab:
-		LCD5110_print("Time: %lu us, distance: %lu cm\n",
-		 measured_time,
-		 distance,
-		 BLACK, &lcd1);
-     }
-	}
-  }
+  		uint32_t distance = measured_time/58;
+  		//! Увага, не забудьте додати:
+  		// monitor arm semihosting enable
+  		// До  Debug Configurations -> Startup Tab:
+  		char buffer[100];
+//  		LCD5110_print("Time is %lu us", BLACK, &lcd1);
+//  		LCD5110_print("Distance is %lu cm", BLACK, &lcd1);
+  		sprintf(buffer, "%d", distance);
+  	}
+    }
   /* USER CODE END 3 */
-
+}
 /**
   * @brief System Clock Configuration
   * @retval None
@@ -229,7 +226,7 @@ void SystemClock_Config(void)
   RCC_OscInitStruct.PLL.PLLSource = RCC_PLLSOURCE_HSE;
   RCC_OscInitStruct.PLL.PLLM = 4;
   RCC_OscInitStruct.PLL.PLLN = 72;
-  RCC_OscInitStruct.PLL.PLLP = RCC_PLLP_DIV6;
+  RCC_OscInitStruct.PLL.PLLP = RCC_PLLP_DIV2;
   RCC_OscInitStruct.PLL.PLLQ = 8;
   if (HAL_RCC_OscConfig(&RCC_OscInitStruct) != HAL_OK)
   {
@@ -245,117 +242,10 @@ void SystemClock_Config(void)
   RCC_ClkInitStruct.APB1CLKDivider = RCC_HCLK_DIV2;
   RCC_ClkInitStruct.APB2CLKDivider = RCC_HCLK_DIV1;
 
-  if (HAL_RCC_ClockConfig(&RCC_ClkInitStruct, FLASH_LATENCY_0) != HAL_OK)
+  if (HAL_RCC_ClockConfig(&RCC_ClkInitStruct, FLASH_LATENCY_2) != HAL_OK)
   {
     Error_Handler();
   }
-}
-
-/**
-  * @brief SPI2 Initialization Function
-  * @param None
-  * @retval None
-  */
-static void MX_SPI2_Init(void)
-{
-
-  /* USER CODE BEGIN SPI2_Init 0 */
-
-  /* USER CODE END SPI2_Init 0 */
-
-  /* USER CODE BEGIN SPI2_Init 1 */
-
-  /* USER CODE END SPI2_Init 1 */
-  /* SPI2 parameter configuration*/
-  hspi2.Instance = SPI2;
-  hspi2.Init.Mode = SPI_MODE_MASTER;
-  hspi2.Init.Direction = SPI_DIRECTION_2LINES;
-  hspi2.Init.DataSize = SPI_DATASIZE_8BIT;
-  hspi2.Init.CLKPolarity = SPI_POLARITY_LOW;
-  hspi2.Init.CLKPhase = SPI_PHASE_1EDGE;
-  hspi2.Init.NSS = SPI_NSS_SOFT;
-  hspi2.Init.BaudRatePrescaler = SPI_BAUDRATEPRESCALER_2;
-  hspi2.Init.FirstBit = SPI_FIRSTBIT_MSB;
-  hspi2.Init.TIMode = SPI_TIMODE_DISABLE;
-  hspi2.Init.CRCCalculation = SPI_CRCCALCULATION_DISABLE;
-  hspi2.Init.CRCPolynomial = 10;
-  if (HAL_SPI_Init(&hspi2) != HAL_OK)
-  {
-    Error_Handler();
-  }
-  /* USER CODE BEGIN SPI2_Init 2 */
-
-  /* USER CODE END SPI2_Init 2 */
-
-}
-
-/**
-  * @brief GPIO Initialization Function
-  * @param None
-  * @retval None
-  */
-static void MX_GPIO_Init(void)
-{
-  GPIO_InitTypeDef GPIO_InitStruct = {0};
-/* USER CODE BEGIN MX_GPIO_Init_1 */
-/* USER CODE END MX_GPIO_Init_1 */
-
-  /* GPIO Ports Clock Enable */
-  __HAL_RCC_GPIOH_CLK_ENABLE();
-  __HAL_RCC_GPIOC_CLK_ENABLE();
-  __HAL_RCC_GPIOA_CLK_ENABLE();
-  __HAL_RCC_GPIOB_CLK_ENABLE();
-
-  /*Configure GPIO pin Output Level */
-  HAL_GPIO_WritePin(GPIOA, GPIO_PIN_0|GPIO_PIN_1|GPIO_PIN_4, GPIO_PIN_RESET);
-
-  /*Configure GPIO pin Output Level */
-  HAL_GPIO_WritePin(Trig_GPIO_Port, Trig_Pin, GPIO_PIN_RESET);
-
-  /*Configure GPIO pin Output Level */
-  HAL_GPIO_WritePin(GPIOC, GPIO_PIN_8|GPIO_PIN_9, GPIO_PIN_RESET);
-
-  /*Configure GPIO pins : PA0 PA1 PA4 */
-  GPIO_InitStruct.Pin = GPIO_PIN_0|GPIO_PIN_1|GPIO_PIN_4;
-  GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
-  GPIO_InitStruct.Pull = GPIO_NOPULL;
-  GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
-  HAL_GPIO_Init(GPIOA, &GPIO_InitStruct);
-
-  /*Configure GPIO pins : PA5 PA7 */
-  GPIO_InitStruct.Pin = GPIO_PIN_5|GPIO_PIN_7;
-  GPIO_InitStruct.Mode = GPIO_MODE_AF_PP;
-  GPIO_InitStruct.Pull = GPIO_NOPULL;
-  GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_VERY_HIGH;
-  GPIO_InitStruct.Alternate = GPIO_AF5_SPI1;
-  HAL_GPIO_Init(GPIOA, &GPIO_InitStruct);
-
-  /*Configure GPIO pin : Trig_Pin */
-  GPIO_InitStruct.Pin = Trig_Pin;
-  GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
-  GPIO_InitStruct.Pull = GPIO_NOPULL;
-  GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
-  HAL_GPIO_Init(Trig_GPIO_Port, &GPIO_InitStruct);
-
-  /*Configure GPIO pin : PB2 */
-  GPIO_InitStruct.Pin = GPIO_PIN_2;
-  GPIO_InitStruct.Mode = GPIO_MODE_IT_RISING_FALLING;
-  GPIO_InitStruct.Pull = GPIO_NOPULL;
-  HAL_GPIO_Init(GPIOB, &GPIO_InitStruct);
-
-  /*Configure GPIO pins : PC8 PC9 */
-  GPIO_InitStruct.Pin = GPIO_PIN_8|GPIO_PIN_9;
-  GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
-  GPIO_InitStruct.Pull = GPIO_NOPULL;
-  GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
-  HAL_GPIO_Init(GPIOC, &GPIO_InitStruct);
-
-  /* EXTI interrupt init*/
-  HAL_NVIC_SetPriority(EXTI2_IRQn, 0, 0);
-  HAL_NVIC_EnableIRQ(EXTI2_IRQn);
-
-/* USER CODE BEGIN MX_GPIO_Init_2 */
-/* USER CODE END MX_GPIO_Init_2 */
 }
 
 /* USER CODE BEGIN 4 */
@@ -369,11 +259,11 @@ static void MX_GPIO_Init(void)
 void Error_Handler(void)
 {
   /* USER CODE BEGIN Error_Handler_Debug */
-  /* User can add his own implementation to report the HAL error return state */
-  __disable_irq();
-  while (1)
-  {
-  }
+	    /* User can add his own implementation to report the HAL error return state */
+	    __disable_irq();
+	    while (1)
+	    {
+	    }
   /* USER CODE END Error_Handler_Debug */
 }
 
@@ -388,9 +278,8 @@ void Error_Handler(void)
 void assert_failed(uint8_t *file, uint32_t line)
 {
   /* USER CODE BEGIN 6 */
-  /* User can add his own implementation to report the file name and line number,
-     ex: printf("Wrong parameters value: file %s on line %d\r\n", file, line) */
-	printf("Wrong parameters value: file %s on line %d\r\n", file, line);
+	    /* User can add his own implementation to report the file name and line number,
+	       ex: printf("Wrong parameters value: file %s on line %d\r\n", file, line) */
   /* USER CODE END 6 */
 }
 #endif /* USE_FULL_ASSERT */
