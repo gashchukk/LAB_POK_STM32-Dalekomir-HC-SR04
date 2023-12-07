@@ -52,7 +52,7 @@ void udelay(uint32_t useconds);
 /* Private variables ---------------------------------------------------------*/
 
 /* USER CODE BEGIN PV */
-
+//
 typedef enum state_t {
  IDLE_S,
  TRIGGERING_S,
@@ -71,27 +71,27 @@ volatile uint32_t echo_start;
 volatile uint32_t echo_finish;
 volatile uint32_t measured_time;
 
-void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
-	{
-	 if (GPIO_Pin == GPIO_PIN_2 )
-	 {
-	  switch (state) {
-	  case WAITING_FOR_ECHO_START_S: {
-	   echo_start =  get_us();
-	   state = WAITING_FOR_ECHO_STOP_S;
-	   break;
-	  }
-	  case WAITING_FOR_ECHO_STOP_S: {
-	   echo_finish = get_us();
-	   measured_time = echo_finish - echo_start;
-	   state = READING_DATA_S;
-	   break;
-	  }
-	  default:
-	   state = ERROR_S;
-	  }
-	 }
-	}
+//void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
+//	{
+//	 if (GPIO_Pin == GPIO_PIN_2 )
+//	 {
+//	  switch (state) {
+//	  case WAITING_FOR_ECHO_START_S: {
+//	   echo_start =  get_us();
+//	   state = WAITING_FOR_ECHO_STOP_S;
+//	   break;
+//	  }
+//	  case WAITING_FOR_ECHO_STOP_S: {
+//	   echo_finish = get_us();
+//	   measured_time = echo_finish - echo_start;
+//	   state = READING_DATA_S;
+//	   break;
+//	  }
+//	  default:
+//	   state = ERROR_S;
+//	  }
+//	 }
+//	}
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -185,16 +185,16 @@ int main(void)
     	    //! Увага, не забудьте додати:
     	    // monitor arm semihosting enable
     	    // До  Debug Configurations -> Startup Tab:
-    	    LCD5110_print("Distance is : ", BLACK, &lcd1);
+//    	    LCD5110_print("Distance is : \n", BLACK, &lcd1);
   		//! Увага, не забудьте додати:
   		// monitor arm semihosting enable
   		// До  Debug Configurations -> Startup Tab:
   		char buffer[100];
-//  		LCD5110_print("Time is %lu us", BLACK, &lcd1);
-//  		LCD5110_print("Distance is %lu cm", BLACK, &lcd1);
   		sprintf(buffer, "%d",  pulse_time*343/20);
   		LCD5110_print(buffer, BLACK, &lcd1);
-  		memset(buffer, '\0', sizeof(buffer));
+  		HAL_Delay(500);
+  		LCD5110_clear_scr(&lcd1);
+
   	}
 
   /* USER CODE END 3 */
